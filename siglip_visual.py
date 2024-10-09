@@ -2,7 +2,7 @@ from typing import Optional, Tuple
 import torch
 import torch.nn as nn
 
-# some copied Config
+# some copied Config from Umar
 class SiglipVisionConfig:
 
     def __init__(
