@@ -1,6 +1,9 @@
 from typing import Optional, Tuple
 import torch
 import torch.nn as nn
+from math import sqrt
+import torch.nn.Functional as F
+
 
 # some copied Config from Umar
 class SiglipVisionConfig:
@@ -40,14 +43,9 @@ class SiglipVisionConfig:
 
 # class SigLipVisionEmbeddings(nn.Module):
 #     def __init__(self, config: SiglipVisionConfig):
-#         super().__init__()
 #         #####################################
 
-#     def forward(self, x: torch.Tensor) -> torch.Tensor:
-#       ###################################
-
-
-class SigLipVisionEmbeddings(nn.Module):
+class SiglipVisionEmbeddings(nn.Module):
 
     def __init__(self, config: SiglipVisionConfig):
         super().__init__()
@@ -82,3 +80,87 @@ class SigLipVisionEmbeddings(nn.Module):
 
 
 
+# once we have the embeddings from the initial step we can
+# pass to blocks of (layer norm + self attention + MLP) 
+# to get contextualized embeddings
+
+
+
+# STEP 2 - Multi layer perceptron implementation
+# Construct SiglipMLP which takes embeddings in the form 
+# [b, num_patches, embed_dim] and converts to the same shape just smarter :p
+
+# class SiglipMLP(nn.Module):
+#     def __init__(self, config: SiglipVisionConfig):
+#         #####################################
+
+class SiglipMLP(nn.Module):
+    def __init__(self, config: SiglipVisionConfig):
+        super().__init__()
+        self.config = config
+        # first stretch the embed_dim to something bigger like intermediate_size
+        self.fc1 = nn.Linear(config.hidden_size, config.intermediate_size)
+        self.fc2 = nn.Linear(config.intermediate_size, config.hidden_size)
+        self.gelu = nn.GELU()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.fc2(self.gelu(self.fc1(x)))
+
+
+
+#  STEP 3 - multi head attention
+#  Construct SiglipAttention which takes embeddings in the form 
+# [b, num_patches, embed_dim] and converts to the same shape just CONTEXTUALIZED!
+
+# class SiglipAttention(nn.Module):
+#     def __init__(self, config: SiglipVisionConfig):
+#         super().__init__()
+#         ########################
+
+
+class SigLipAttention(nn.Module):
+    def __init__(self, config: SiglipVisionConfig):
+        super().__init__()
+
+        self.k_proj = nn.Linear(config.hidden_size, config.hidden_size)
+        self.q_proj = nn.Linear(config.hidden_size, config.hidden_size)
+        self.v_proj = nn.Linear(config.hidden_size, config.hidden_size)
+
+        self.embed_dim = config.hidden_size
+        self.num_heads = config.num_attention_heads
+        self.head_dim = config.hidden_size/self.num_heads
+        self.dropout = config.attention_dropout
+
+        self.o_proj = nn.Linear(config.hidden_size, config.hidden_size)
+
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+
+        batch_size, num_patches, embed_dim = x.size()
+
+        k = self.k_proj(x)
+        q = self.q_proj(x)
+        v = self.v_proj(x)
+
+        # why transpose below? each head shhould be able to 
+        # visualize everything separately and in parallel
+        q = q.view(batch_size, num_patches, self.num_heads, self.head_dim).transpose(1,2)
+        k = k.view(batch_size, num_patches, self.num_heads, self.head_dim).transpose(1,2)
+        v = v.view(batch_size, num_patches, self.num_heads, self.head_dim).transpose(1,2)
+
+        # all are shaped [batch_size, self.num_heads, num_patches, self.head_dim] as of now
+
+        # transpose required to get num_patches x num_patches square in the
+        #  end eliminating head_dim
+        attn_weights = (q @ k.transpose(2,3))/sqrt(self.embed_dim)
+        attn_weights = F.softmax(attn_weights, dim = -1 )
+        attn_weights = F.dropout(attn_weights, dropout = self.dropout)
+        # take a weighted sum of value vectors
+        attn_output = attn_weights @ v
+        attn_output = attn_output.transpose(1,2).contiguous()
+        attn_output = attn_output.view(batch_size, num_patches, self.embed_dim)
+
+        # to mix between heads
+        final = self.o_proj(attn_output)
+
+        return final
