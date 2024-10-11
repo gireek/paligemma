@@ -1,3 +1,4 @@
+from turtle import forward
 from typing import Optional, Tuple
 import torch
 import torch.nn as nn
@@ -80,11 +81,9 @@ class SiglipVisionEmbeddings(nn.Module):
         return x
 
 
-
 # once we have the embeddings from the initial step we can
 # pass to blocks of (layer norm + self attention + MLP) 
 # to get contextualized embeddings
-
 
 
 # STEP 2 - Multi layer perceptron implementation
@@ -106,7 +105,6 @@ class SiglipMLP(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.fc2(self.gelu(self.fc1(x)))
-
 
 
 #  STEP 3 - multi head attention
@@ -165,3 +163,48 @@ class SigLipAttention(nn.Module):
         final = self.o_proj(attn_output)
 
         return final
+
+
+#  STEP 4 - Make a layer 
+#  Construct SiglipEncoderLayer which takes embeddings and converts to the same shape after going through loops
+#  of normalization, attention, skip connection, normalization, MLP and another skip connection going forward
+
+# class SiglipEncoderLayer(nn.Module):
+#     def __init__(self, config: SiglipVisionConfig):
+#         super().__init__()
+#         ########################
+
+
+class SiglipEncoderLayer(nn.Module):
+    def __init__(self, config: SiglipVisionConfig):
+        super().__init__()
+
+        self.layer_norm1 = nn.LayerNorm(config.hidden_size)
+        self.layer_norm2 = nn.LayerNorm(config.hidden_size)
+        self.self_attn = SigLipAttention(config)
+        self.mlp = SiglipMLP(config)
+
+    def forward(self, x):
+
+        normalized_x = self.norm1(x)
+        att_x = self.att_block(normalized_x)
+        att_x += x
+
+        normalized_att_x = self.norm2(att_x)
+        mlp_x = self.mlp(normalized_att_x)
+        mlp_x += att_x
+
+        return mlp_x
+
+
+
+#  STEP 5 - Make a layer 
+#  Construct SiglipEncoderLayer which takes embeddings and converts to the same shape after going through loops
+#  of normalization, attention, skip connection, normalization, MLP and another skip connection going forward
+
+# class SiglipEncoderLayer(nn.Module):
+#     def __init__(self, config: SiglipVisionConfig):
+#         super().__init__()
+#         ########################
+
+
