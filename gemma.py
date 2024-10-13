@@ -78,7 +78,9 @@ class PaliGemmaForConditionalGeneration(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.config = config
+        # image encoder
         self.vision_tower = SiglipVisionModel(config.vision_config)
+        # to convert to size of text tokens so can be concatenated
         self.multi_modal_projector = PaliGemmaMultiModalProjector(config)
         self.vocab_size = config.vocab_size
 
@@ -92,10 +94,26 @@ class PaliGemmaForConditionalGeneration(nn.Module):
     
     def forward(self, input_ids, pixel_values, attnetion_mask, kv_cache):
 
-        # 1. get the text embeddings
-        inputs_embeds = self.language_model
 
+        # 1. get the input embeddings - mixture of image and text embeddings
+        inputs_embeds = self.language_model.get_input_embeddings()(input_ids)
 
+        # 2. Merge text and images
+        # [b, c, h, w] -> [b, num_patches, embed_dim]
+        selected_img_feature = self.vision_tower(pixel_values)
+        image_features = self.multi_modal_projector(selected_img_feature)
+
+        # Merge the embeddings of the text tokens and the image tokens
+        inputs_embeds, attention_mask, position_ids = self._merge_input_ids_with_image_features(image_features, inputs_embeds, input_ids, attention_mask, kv_cache)
+        
+        outputs = self.language_model(
+            attention_mask=attention_mask,
+            position_ids=position_ids,
+            inputs_embeds=inputs_embeds,
+            kv_cache=kv_cache,
+        )
+
+        return outputs
 
 
 
